@@ -3,16 +3,17 @@ from __future__ import annotations
 
 from datetime import timedelta
 import logging
+import time
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import RinnaiApi, RinnaiError
+from .api import RinnaiApi, RinnaiError, RinnaiPultOfflineError
 from .const import (
     CONF_DEVICE_ID, CONF_LOCAL_PORT, CONF_ROOM_CONTROL_ID, DEFAULT_LOCAL_PORT,
-    DOMAIN, SCAN_INTERVAL_SECONDS,
+    DOMAIN, LOCAL_GRACE_SECONDS, SCAN_INTERVAL_SECONDS,
 )
 from . import protocol
 from .server import RinnaiLocalServer
@@ -37,6 +38,7 @@ class RinnaiCoordinator(DataUpdateCoordinator[dict]):
         self.server = RinnaiLocalServer(port, self._on_local_state)
         self._local_state: dict | None = None
         self._cloud_extras: dict = {}
+        self._started = time.time()
 
     # ---------- источник данных ----------
 
@@ -75,9 +77,19 @@ class RinnaiCoordinator(DataUpdateCoordinator[dict]):
             return self._merged()
         try:
             data = await self.hass.async_add_executor_job(self.api.get_status)
+        except RinnaiPultOfflineError as err:
+            # «Пульт отключён от облака» — норма, когда он ушёл на наш сервер:
+            # после старта HA он стучится к нам через несколько секунд. Даём
+            # ему льготное окно и отдаём последнее известное состояние, а не
+            # роняем интеграцию в ERROR. Молчит дольше окна — это уже потеря связи.
+            last_contact = max(self._started, self.server.last_seen or 0)
+            if time.time() - last_contact < LOCAL_GRACE_SECONDS:
+                _LOGGER.debug("Ждём пульт на локальном сервере: %s", err)
+                # Пока состояния нет вовсе (первый опрос) — сущности остаются
+                # недоступными, а не показывают «выключено» с пустыми данными.
+                return self.data
+            raise UpdateFailed(str(err)) from err
         except RinnaiError as err:
-            # «Пульт отключён от облака» — норма, когда он ушёл на наш сервер.
-            # Ждём его локально, а не роняем интеграцию.
             raise UpdateFailed(str(err)) from err
         self._cloud_extras = {
             "schedule": data.get("schedule"),
