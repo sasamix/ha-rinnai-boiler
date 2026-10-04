@@ -19,5 +19,19 @@
     "abort": {
       "already_configured": "Этот котёл уже настроен."
     }
+  },
+  "entity": {
+    "climate": {
+      "heating": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "room": "По температуре в доме",
+              "circuit": "По теплоносителю"
+            }
+          }
+        }
+      }
+    }
   }
 }

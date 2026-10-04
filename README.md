@@ -26,9 +26,10 @@ and echoes everything else back untouched. Fields we don't understand can't get 
 
 ## What you get
 
-* `climate` — heating: room temperature, setpoint 10–40 °C, on/off
+* `climate` — heating, in either of the boiler's two modes (a preset on the thermostat):
+  by room temperature, setpoint 10–40 °C, or by heating water temperature, setpoint 40–80 °C
 * `water_heater` — hot water: current temperature, setpoint 35–60 °C, on/off
-* `number` — heating circuit water temperature, 20–80 °C
+* `number` — heating circuit water temperature, 40–80 °C
 * `sensor` — room and hot water temperature, circuit setpoint, mode, burner state, error code, schedule, data source
 * `binary_sensor` — fault, hot water flowing, controller offline
 * `switch` — power, heating, hot water, circuit mode, away, economy, night
@@ -134,9 +135,10 @@ MIT
 
 ### Что появляется в Home Assistant
 
-* `climate` — отопление: температура в доме, уставка 10–40 °C, вкл/выкл
+* `climate` — отопление в любом из двух режимов котла (пресет термостата):
+  по температуре в доме, уставка 10–40 °C, или по теплоносителю, уставка 40–80 °C
 * `water_heater` — горячая вода: текущая температура, уставка 35–60 °C, вкл/выкл
-* `number` — температура теплоносителя, 20–80 °C
+* `number` — температура теплоносителя, 40–80 °C
 * `sensor` — температура в доме и ГВС, уставка контура, режим, состояние горелки, код ошибки, расписание, источник данных
 * `binary_sensor` — авария, водоразбор, нет связи с пультом
 * `switch` — питание, отопление, ГВС, режим по теплоносителю, отъезд, эконом, ночной

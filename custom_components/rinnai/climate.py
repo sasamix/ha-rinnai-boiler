@@ -1,4 +1,10 @@
-"""Отопление котла Rinnai (термостат, виден в Apple Home)."""
+"""Отопление котла Rinnai (термостат, виден в Apple Home).
+
+Котёл греет в одном из двух режимов, и у них разные уставки:
+  * по температуре в доме (датчик в пульте) — 10–40 °C;
+  * по температуре теплоносителя — 40–80 °C.
+Режим выбирается пресетом; диапазон и уставка термостата следуют за ним.
+"""
 from __future__ import annotations
 
 from homeassistant.components.climate import (
@@ -10,9 +16,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import RinnaiConfigEntry
 from .const import (
-    FLAG_CIRCUIT_MODE, FLAG_HEATING, FLAG_HOT_WATER, FLAG_POWER, ROOM_MAX, ROOM_MIN,
+    CIRCUIT_MAX, CIRCUIT_MIN, FLAG_CIRCUIT_MODE, FLAG_HEATING, FLAG_HOT_WATER,
+    FLAG_POWER, ROOM_MAX, ROOM_MIN,
 )
 from .entity import RinnaiEntity
+
+PRESET_ROOM = "room"
+PRESET_CIRCUIT = "circuit"
 
 
 async def async_setup_entry(
@@ -22,40 +32,67 @@ async def async_setup_entry(
 
 
 class RinnaiClimate(RinnaiEntity, ClimateEntity):
-    """Отопление по температуре воздуха в помещении."""
+    """Отопление: по воздуху в доме или по теплоносителю."""
 
+    _attr_translation_key = "heating"
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
+    _attr_preset_modes = [PRESET_ROOM, PRESET_CIRCUIT]
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
+        | ClimateEntityFeature.PRESET_MODE
         | ClimateEntityFeature.TURN_ON
         | ClimateEntityFeature.TURN_OFF
     )
-    _attr_min_temp = ROOM_MIN
-    _attr_max_temp = ROOM_MAX
     _attr_target_temperature_step = 1
 
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "climate", "Отопление")
 
+    # ---------- режим ----------
+
+    @property
+    def _circuit_mode(self) -> bool:
+        return bool(self._data.get("circuit_mode"))
+
+    @property
+    def preset_mode(self) -> str:
+        return PRESET_CIRCUIT if self._circuit_mode else PRESET_ROOM
+
+    @property
+    def min_temp(self) -> float:
+        return CIRCUIT_MIN if self._circuit_mode else ROOM_MIN
+
+    @property
+    def max_temp(self) -> float:
+        return CIRCUIT_MAX if self._circuit_mode else ROOM_MAX
+
+    # ---------- температуры ----------
+
     @property
     def current_temperature(self) -> float | None:
+        # Температуру теплоносителя котёл не сообщает, так что в обоих
+        # режимах показываем воздух в доме — единственный живой датчик.
         return self._data.get("room_cur")
 
     @property
     def target_temperature(self) -> float | None:
-        value = self._data.get("room_set")
+        key = "circuit_set" if self._circuit_mode else "room_set"
+        value = self._data.get(key)
         if value is None:
             return None
-        # В режиме «по теплоносителю» пульт кладёт в это поле уставку контура,
-        # которая выходит за диапазон комнатного термостата. Показываем
-        # значение, ограниченное допустимым диапазоном, иначе Home Assistant
-        # и HomeKit получают состояние вне собственных границ сущности.
-        return min(max(float(value), ROOM_MIN), ROOM_MAX)
+        # В режиме «по теплоносителю» пульт дублирует уставку контура и в байт
+        # комнатной уставки, поэтому после переключения режима там может лежать
+        # число вне диапазона термостата. Отдаём значение в границах сущности,
+        # иначе Home Assistant и HomeKit получают состояние вне своих пределов.
+        return min(max(float(value), self.min_temp), self.max_temp)
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"raw_room_setpoint": self._data.get("room_set")}
+        return {
+            "raw_room_setpoint": self._data.get("room_set"),
+            "raw_circuit_setpoint": self._data.get("circuit_set"),
+        }
 
     @property
     def hvac_mode(self) -> HVACMode:
@@ -67,28 +104,48 @@ class RinnaiClimate(RinnaiEntity, ClimateEntity):
         data = self._data
         if not data.get("power") or not data.get("heating"):
             return HVACAction.OFF
-        current, target = data.get("room_cur"), data.get("room_set")
-        if current is not None and target is not None and current < target:
+        # Горит ли горелка на отопление: по состоянию горелки, а не по
+        # сравнению температур — в режиме по теплоносителю сравнивать не с чем.
+        if data.get("combustion_state") and not data.get("hot_water_using"):
             return HVACAction.HEATING
         return HVACAction.IDLE
+
+    # ---------- команды ----------
 
     async def async_set_temperature(self, **kwargs) -> None:
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
-        value = max(ROOM_MIN, min(ROOM_MAX, int(round(temperature))))
-        await self.coordinator.async_set_room_temp(value)
+        value = int(round(temperature))
+        if self._circuit_mode:
+            value = max(CIRCUIT_MIN, min(CIRCUIT_MAX, value))
+            await self.coordinator.async_set_circuit_temp(value)
+        else:
+            value = max(ROOM_MIN, min(ROOM_MAX, value))
+            await self.coordinator.async_set_room_temp(value)
+
+    def _flags(self, *, heating: bool, circuit: bool) -> int:
+        flags = FLAG_POWER
+        if circuit:
+            flags |= FLAG_CIRCUIT_MODE
+        if self._data.get("hot_water"):
+            flags |= FLAG_HOT_WATER
+        if heating:
+            flags |= FLAG_HEATING
+        return flags
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        data = self._data
-        flags = FLAG_POWER
-        if data.get("circuit_mode"):
-            flags |= FLAG_CIRCUIT_MODE
-        if data.get("hot_water"):
-            flags |= FLAG_HOT_WATER
-        if hvac_mode == HVACMode.HEAT:
-            flags |= FLAG_HEATING
-        await self.coordinator.async_set_flags(flags)
+        await self.coordinator.async_set_flags(
+            self._flags(heating=hvac_mode == HVACMode.HEAT, circuit=self._circuit_mode)
+        )
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        await self.coordinator.async_set_flags(
+            self._flags(
+                heating=self.hvac_mode == HVACMode.HEAT,
+                circuit=preset_mode == PRESET_CIRCUIT,
+            )
+        )
 
     async def async_turn_on(self) -> None:
         await self.async_set_hvac_mode(HVACMode.HEAT)

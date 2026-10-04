@@ -19,5 +19,19 @@
     "abort": {
       "already_configured": "This boiler is already configured."
     }
+  },
+  "entity": {
+    "climate": {
+      "heating": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "room": "Room temperature",
+              "circuit": "Water temperature"
+            }
+          }
+        }
+      }
+    }
   }
 }

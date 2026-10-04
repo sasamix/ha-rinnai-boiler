@@ -1,7 +1,7 @@
 {
   "domain": "rinnai",
   "name": "Rinnai Boiler",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "documentation": "https://github.com/abaskalov/ha-rinnai-boiler",
   "issue_tracker": "https://github.com/abaskalov/ha-rinnai-boiler/issues",
   "codeowners": [
