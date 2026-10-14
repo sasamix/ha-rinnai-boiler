@@ -57,12 +57,7 @@ class RinnaiWaterHeater(RinnaiEntity, WaterHeaterEntity):
         await self.coordinator.async_set_hot_water_temp(value)
 
     async def async_set_operation_mode(self, operation_mode: str) -> None:
-        data = self._data
-        flags = FLAG_POWER
-        if data.get("circuit_mode"):
-            flags |= FLAG_CIRCUIT_MODE
-        if data.get("heating"):
-            flags |= FLAG_HEATING
-        if operation_mode == STATE_ON:
-            flags |= FLAG_HOT_WATER
-        await self.coordinator.async_set_flags(flags)
+        # Local 2.2.1: не сбрасываем отопление, подогрев и неизвестные флаги.
+        await self.coordinator.async_update_flags(
+            set_bits=FLAG_POWER | (FLAG_HOT_WATER if operation_mode == STATE_ON else 0),
+            clear_bits=FLAG_HOT_WATER if operation_mode == STATE_OFF else 0)

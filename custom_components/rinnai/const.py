@@ -48,3 +48,8 @@ SCAN_INTERVAL_SECONDS = 60
 # Сколько ждать пульт на локальном сервере (после старта HA или после его
 # последнего визита), прежде чем «пульт отключён от облака» считать потерей связи.
 LOCAL_GRACE_SECONDS = 300
+
+# Local 2.2.1: запуск без регистрации телефона и без облачного fallback.
+CONF_LOCAL_ONLY = "local_only"
+LOCAL_TIMEOUT_SECONDS = 30
+COMMAND_TTL_SECONDS = 30

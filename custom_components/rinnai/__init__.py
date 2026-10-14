@@ -21,19 +21,31 @@ type RinnaiConfigEntry = ConfigEntry[RinnaiCoordinator]
 
 async def async_setup_entry(hass: HomeAssistant, entry: RinnaiConfigEntry) -> bool:
     coordinator = RinnaiCoordinator(hass, entry)
-    await coordinator.server.start()
+    # Local 2.2.1: при неудачной загрузке не оставляем занятый порт.
+    try:
+        await coordinator.server.start()
+    except Exception:
+        await coordinator.server.stop()
+        raise
     entry.async_on_unload(coordinator.server.stop)
     # Первый опрос может не удаться (например, пульт уже ушёл на наш сервер,
     # и облако его «не видит») — это не повод не запускаться.
     await coordinator.async_refresh()
     entry.runtime_data = coordinator
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except Exception:
+        await coordinator.server.stop()
+        raise
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: RinnaiConfigEntry) -> bool:
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded:
+        await entry.runtime_data.server.stop()
+    return unloaded
 
 
 async def _async_reload_entry(hass: HomeAssistant, entry: RinnaiConfigEntry) -> None:

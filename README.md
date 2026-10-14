@@ -1,181 +1,94 @@
-# Rinnai Boiler for Home Assistant
+# Rinnai Boiler — local-first fork
 
-Home Assistant integration for Rinnai gas boilers that come with a **WF-100W / WF-S100** Wi-Fi room
-controller (sold as *Rinnai Smart IoT* in Russia and Kazakhstan, *Rinnai Smart Boiler* in Korea).
+Home Assistant integration for Rinnai WF-100W / WF-S100 Wi-Fi controllers.
+This fork adds explicit local setup without a registered phone DeviceId.
+Based on [abaskalov/ha-rinnai-boiler](https://github.com/abaskalov/ha-rinnai-boiler).
+Original MIT license and protocol credits are retained.
 
-It can talk to the Rinnai cloud the same way the phone app does — or replace the cloud entirely,
-so the controller talks to Home Assistant and nothing leaves your network.
+## Installation through HACS
 
-Tested on an **RBK-197 RTU** with a **WF-100W-RU** controller. [По-русски ниже](#по-русски).
+1. If the original repository is downloaded in HACS, remove that download first.
+   Both projects use the same `rinnai` domain and must not be installed together.
+   Preserve any existing integration configuration; entity unique IDs are unchanged.
+2. HACS → Custom repositories → add
+   `https://github.com/sasamix/ha-rinnai-boiler`, category **Integration**.
+3. Download the integration from the `main` branch and restart Home Assistant.
+4. Settings → Devices & services → Add integration → **Rinnai Boiler**.
 
-![Cloud mode vs local mode](docs/architecture.svg)
+## Local setup / Локальная настройка
 
-## How it works
+Enable **Local only / Только локально**, enter the controller's Wi-Fi MAC
+(12 hexadecimal characters, colons accepted), leave **DeviceId empty**,
+and use TCP port **9105**.
 
-| Mode | What happens | Internet |
-|---|---|---|
-| **Cloud** | Home Assistant polls the Rinnai cloud with the same API the app uses | required |
-| **Local** | The controller connects to a small server built into the integration instead of the cloud | not needed |
+The entry is created without any cloud request. Entities remain unavailable
+until valid state packets arrive from the configured controller.
 
-You don't pick a mode. As soon as the controller registers on the local server, the cloud is no
-longer used. The `Source` sensor shows which one is active right now.
+Verify the listener first: `http://HOME_ASSISTANT_IP:9105/health`.
+It reports the configured controller MAC, version, and connection state.
+`online: false` before redirection is normal.
 
-The boiler is a gas appliance, so the integration is deliberately conservative: it never rebuilds
-the controller's status packet from parsed fields. It changes only the bytes it means to change
-and echoes everything else back untouched. Fields we don't understand can't get corrupted.
+The controller normally sends plain HTTP to `wifiboilers1.rinnai.co.kr:9105`.
+Redirect that connection to Home Assistant using a controller-specific router
+dstnat rule, or DNS when appropriate for your topology. Ensure replies travel
+through the translating router. If the networks use different gateways, a narrow
+srcnat rule may be needed. RouterOS NAT changes require removing the old
+controller connection or reconnecting that controller to Wi-Fi.
 
-## What you get
+The server must be reachable on TCP 9105. A Docker installation needs host
+networking or an explicitly published port. Do not expose it to the internet.
 
-* `climate` — heating, in either of the boiler's two modes (a preset on the thermostat):
-  by room temperature, setpoint 10–40 °C, or by heating water temperature, setpoint 40–80 °C
-* `water_heater` — hot water: current temperature, setpoint 35–60 °C, on/off
-* `number` — heating circuit water temperature, 40–80 °C
-* `sensor` — room and hot water temperature, circuit setpoint, mode, burner state, error code, schedule, data source
-* `binary_sensor` — fault, hot water flowing, controller offline
-* `switch` — power, heating, hot water, circuit mode, away, economy, night
+When `/health` reports `online: true`, check HA temperatures against the physical
+controller. Change the room setpoint by one degree and back, then test hot water.
+HA reports the next measured state packet, rather than assuming a command worked.
 
-`climate` and `water_heater` pass through the HomeKit bridge, so the boiler shows up in Apple Home.
+**Пока пульт направлен на HA, штатное приложение Rinnai не видит котёл.**
+Для возврата облака выключите перенаправление и переподключите пульт к Wi-Fi.
 
-| Apple Home | Home Assistant |
-|---|---|
-| <img src="docs/apple-home.png" width="300" alt="Boiler in Apple Home"> | <img src="docs/home-assistant.png" width="300" alt="Boiler in Home Assistant"> |
+## Changes in 2.2.1
 
-## Install
+- Local configuration needs only the controller MAC and listener port.
+- Local-only entries never poll the cloud, including after disconnects.
+- Room/hot-water commands patch the latest complete state payload.
+- Mirrored active setpoints are updated together when both fields already agree.
+- Flag switches preserve other bits and apply to the next fresh state packet.
+- Controller MAC, frame length, hex encoding and checksum are checked.
+- Commands require fresh state and expire after 30 seconds.
+- Connection diagnosis updates every 10 seconds; packets expire after 30 seconds.
+- Health endpoint allows testing the server before redirecting the controller.
+- Economy/night controls are omitted for local-only entries: their local fields
+  have not been confirmed.
+- Cloud configuration accepts either a UUID or the 16-character Android ID used
+  by some Android Rinnai versions. It still needs a registered identifier.
 
-1. Copy `custom_components/rinnai` into `config/custom_components/`, or add this repository to HACS
-   as a custom repository.
-2. Restart Home Assistant.
-3. *Settings → Devices & services → Add integration → Rinnai*.
-4. Fill in two fields:
-   * **RoomControlId** — the controller's Wi-Fi MAC address as 12 hex characters, e.g. `a1b2c3d4e5f6`.
-     Your router's client list will show it, usually under the name `Thermostat`.
-   * **DeviceId** — the UUID of a phone that is already registered in the Rinnai app. The cloud
-     rejects unknown ids, so it has to be a real one; grab it with any HTTPS sniffer
-     (HTTP Catcher, Proxyman) from a request to `wifiboilers1.rinnai.co.kr`.
+## Validation and limits
 
-No password is stored — the cloud authenticates by these two headers alone.
+The implementation was replay-tested against 26 captured HTTP frames from a
+WF-100W-RU, including room and DHW changes and subsequent state confirmation.
+No private capture, controller session token or personal network configuration
+is included in this repository.
 
-## Going cloud-free
+Run the reproducible synthetic HTTP/configuration tests:
 
-The controller resolves `wifiboilers1.rinnai.co.kr` and opens a connection to port **9105**.
-Point that name at Home Assistant and it will talk to the built-in server instead.
+```sh
+python -m pip install aiohttp voluptuous
+python tests/verify_local.py
+python -m compileall -q custom_components/rinnai
+```
 
-1. Add a static DNS record on your router: `wifiboilers1.rinnai.co.kr` → *your Home Assistant IP*.
-   Make sure it is the **only** record for that name.
-2. Make the controller look the name up again. It caches the address in RAM, so dropping the
-   connection isn't enough — restart the Wi-Fi access point or power-cycle the controller.
-3. The `Source` sensor switches to *Local*.
+Tests use a real aiohttp server and small Home Assistant stubs. Physical appliance
+operation and an actual Home Assistant runtime are still pending verification.
+Registration tests use synthetic packets. Other operating modes are inherited
+from upstream and have not been verified on every controller/firmware.
 
-While the controller is local, the official Rinnai app can't see the boiler. Heating itself doesn't
-depend on any of this: the controller drives the boiler over a cable, with or without a server.
+Unknown payload fields are echoed unchanged. Long-term schedule/clock behavior
+needs observation; this fork does not synthesize the cloud's clock fields.
+MAC filtering identifies the intended controller but is not cryptographic
+authentication. Use a trusted local network.
 
-<details>
-<summary><b>Protocol notes</b></summary>
+## Credits and license
 
-Packets are ASCII: `<prefix:6><command:2><length:2><data><checksum:2>7d`. `length` counts hex
-characters of `data`; the checksum is `sum(ord(c) for c in data) % 256`. The cloud HTTP API always
-sends `00` instead of a real checksum — the controller doesn't, and rejects replies with a wrong one.
-
-Controller endpoints (port 9105, plain HTTP):
-
-* `POST /register` — `re0000` + MAC + product code. Reply: `re0100` + any 32-character token.
-* `POST /state` — `re0101` + full status. The reply must echo the payload; to send a command,
-  change the prefix to `sm0101` and patch the bytes you want.
-
-Known status bytes: `0` flags (`0x01` power, `0x02` circuit mode, `0x04` heating, `0x08` hot water,
-`0x10` preheat, `0x20` quick heat), `1` room setpoint, `2` circuit setpoint, `3` hot water setpoint,
-`4` room temperature, `5` hot water temperature, `6` burner/flow status (`&0x0f` combustion,
-`0x20` hot water flowing), `7–8` error code (`ffff` = none), `9` away. A temperature with bit
-`0x80` set carries an extra half degree.
-
-Cloud commands (`POST /control`): `01` flags, `02` room setpoint, `03` circuit setpoint,
-`04` hot water setpoint, `05` away, `07` economy, `08` night.
-
-</details>
-
-## Credits
-
-Protocol groundwork: [mog422/open-rinnai-server](https://github.com/mog422/open-rinnai-server)
-and [zobithecat/rinnai-ha](https://github.com/zobithecat/rinnai-ha).
-
-## Disclaimer
-
-This software controls a gas appliance. It is not affiliated with or endorsed by Rinnai.
-Use at your own risk.
-
-## License
-
-MIT
-
----
-
-## По-русски
-
-Интеграция газовых котлов Rinnai с Wi-Fi-пультом **WF-100W / WF-S100** («Смарт управление» / *Rinnai Smart IoT*)
-в Home Assistant.
-
-Работает двумя способами: через облако Rinnai — точно так же, как приложение на телефоне, —
-или полностью без облака: пульт подключается к Home Assistant, и наружу не уходит ничего.
-
-Проверено на **RBK-197 RTU** с пультом **WF-100W-RU**.
-
-### Как это устроено
-
-| Режим | Что происходит | Интернет |
-|---|---|---|
-| **Облако** | Home Assistant опрашивает облако Rinnai тем же API, что и приложение | нужен |
-| **Локально** | Пульт подключается к маленькому серверу внутри интеграции вместо облака | не нужен |
-
-Режим выбирать не надо: как только пульт зарегистрировался на локальном сервере, облако больше
-не используется. Датчик «Источник» показывает, что активно сейчас.
-
-Котёл — газовый прибор, поэтому интеграция осторожна: она никогда не собирает пакет состояния
-заново из разобранных полей. Меняются только те байты, которые нужно поменять, всё остальное
-возвращается пульту как есть. Непонятные нам поля испортить невозможно.
-
-### Что появляется в Home Assistant
-
-* `climate` — отопление в любом из двух режимов котла (пресет термостата):
-  по температуре в доме, уставка 10–40 °C, или по теплоносителю, уставка 40–80 °C
-* `water_heater` — горячая вода: текущая температура, уставка 35–60 °C, вкл/выкл
-* `number` — температура теплоносителя, 40–80 °C
-* `sensor` — температура в доме и ГВС, уставка контура, режим, состояние горелки, код ошибки, расписание, источник данных
-* `binary_sensor` — авария, водоразбор, нет связи с пультом
-* `switch` — питание, отопление, ГВС, режим по теплоносителю, отъезд, эконом, ночной
-
-`climate` и `water_heater` проходят через мост HomeKit — котёл виден в Apple Home
-(скриншоты выше).
-
-### Установка
-
-1. Скопируйте `custom_components/rinnai` в `config/custom_components/` или добавьте репозиторий
-   в HACS как пользовательский.
-2. Перезапустите Home Assistant.
-3. *Настройки → Устройства и службы → Добавить интеграцию → Rinnai*.
-4. Два поля:
-   * **RoomControlId** — MAC-адрес Wi-Fi пульта, 12 hex-символов, например `a1b2c3d4e5f6`.
-     Виден в списке клиентов роутера, обычно под именем `Thermostat`.
-   * **DeviceId** — UUID телефона, уже зарегистрированного в приложении Rinnai. Облако отвергает
-     незнакомые id, так что нужен настоящий; его видно в любом HTTPS-сниффере
-     (HTTP Catcher, Proxyman) в запросе к `wifiboilers1.rinnai.co.kr`.
-
-Пароль не хранится — облако авторизует только по этим двум заголовкам.
-
-### Без облака
-
-Пульт резолвит имя `wifiboilers1.rinnai.co.kr` и открывает соединение на порт **9105**.
-Направьте это имя на Home Assistant — и пульт придёт на встроенный сервер.
-
-1. Добавьте на роутере статическую DNS-запись: `wifiboilers1.rinnai.co.kr` → *IP Home Assistant*.
-   Запись для этого имени должна быть **одна**.
-2. Заставьте пульт заново разрешить имя. Адрес он кеширует в памяти, обрыв соединения не
-   помогает — перезапустите точку доступа Wi-Fi или передёрните питание пульта.
-3. Датчик «Источник» переключится на «Локально».
-
-Пока пульт локальный, официальное приложение Rinnai котёл не видит. На само отопление это не
-влияет: пульт управляет котлом по кабелю, с сервером или без.
-
-### Ответственность
-
-Это программа для управления газовым прибором. Проект не связан с Rinnai и не одобрен ею.
-Используйте на свой риск. Лицензия — MIT.
+- Original integration: [abaskalov](https://github.com/abaskalov/ha-rinnai-boiler).
+- Protocol groundwork: [mog422/open-rinnai-server](https://github.com/mog422/open-rinnai-server)
+  and [zobithecat/rinnai-ha](https://github.com/zobithecat/rinnai-ha).
+- MIT, see [LICENSE](LICENSE). Not affiliated with Rinnai.

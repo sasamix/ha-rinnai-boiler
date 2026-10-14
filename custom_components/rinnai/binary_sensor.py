@@ -41,6 +41,9 @@ class RinnaiOffline(RinnaiEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool:
+        # Local 2.2.1: связь определяется фактическими пакетами пульта.
+        if self.coordinator.local_only:
+            return not self.coordinator.local_active
         return not self.coordinator.last_update_success
 
 

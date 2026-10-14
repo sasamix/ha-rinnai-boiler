@@ -20,7 +20,7 @@ class RinnaiEntity(CoordinatorEntity[RinnaiCoordinator]):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.room_control_id)},
             manufacturer="Rinnai",
-            model="RBK-197 RTU",
+            model="WF-100W-RU",
             name="Котёл",
             configuration_url="https://www.rinnai.ru",
         )

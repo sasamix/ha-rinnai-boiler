@@ -26,12 +26,14 @@ async def async_setup_entry(
         RinnaiFlagSwitch(coordinator, *args) for args in FLAG_SWITCHES
     ]
     entities.append(RinnaiAwaySwitch(coordinator))
-    entities.append(
-        RinnaiBlindSwitch(coordinator, "economy", "Эконом", coordinator.async_set_economy)
-    )
-    entities.append(
-        RinnaiBlindSwitch(coordinator, "sleep", "Ночной", coordinator.async_set_sleep)
-    )
+    # Local 2.2.1: облачные режимы не показываем в локальной записи.
+    if not coordinator.local_only:
+        entities.append(
+            RinnaiBlindSwitch(coordinator, "economy", "Эконом", coordinator.async_set_economy)
+        )
+        entities.append(
+            RinnaiBlindSwitch(coordinator, "sleep", "Ночной", coordinator.async_set_sleep)
+        )
     async_add_entities(entities)
 
 
@@ -49,12 +51,11 @@ class RinnaiFlagSwitch(RinnaiEntity, SwitchEntity):
         return bool(self._data.get(self._key))
 
     async def _apply(self, turn_on: bool) -> None:
-        flags = int(self._data.get("flags") or 0)
-        flags = (flags | self._bit) if turn_on else (flags & ~self._bit)
+        set_bits = self._bit if turn_on else 0
         if turn_on and self._bit != FLAG_POWER:
-            # Любой режим имеет смысл только при включённом котле.
-            flags |= FLAG_POWER
-        await self.coordinator.async_set_flags(flags & 0xFF)
+            set_bits |= FLAG_POWER
+        await self.coordinator.async_update_flags(
+            set_bits=set_bits, clear_bits=0 if turn_on else self._bit)
 
     async def async_turn_on(self, **kwargs) -> None:
         await self._apply(True)

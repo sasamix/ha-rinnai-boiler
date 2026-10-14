@@ -135,17 +135,14 @@ class RinnaiClimate(RinnaiEntity, ClimateEntity):
         return flags
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        await self.coordinator.async_set_flags(
-            self._flags(heating=hvac_mode == HVACMode.HEAT, circuit=self._circuit_mode)
-        )
+        await self.coordinator.async_update_flags(
+            set_bits=FLAG_POWER | (FLAG_HEATING if hvac_mode == HVACMode.HEAT else 0),
+            clear_bits=FLAG_HEATING if hvac_mode == HVACMode.OFF else 0)
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        await self.coordinator.async_set_flags(
-            self._flags(
-                heating=self.hvac_mode == HVACMode.HEAT,
-                circuit=preset_mode == PRESET_CIRCUIT,
-            )
-        )
+        await self.coordinator.async_update_flags(
+            set_bits=FLAG_POWER | (FLAG_CIRCUIT_MODE if preset_mode == PRESET_CIRCUIT else 0),
+            clear_bits=FLAG_CIRCUIT_MODE if preset_mode == PRESET_ROOM else 0)
 
     async def async_turn_on(self) -> None:
         await self.async_set_hvac_mode(HVACMode.HEAT)

@@ -38,7 +38,7 @@ class Packet:
     @classmethod
     def parse(cls, raw: str) -> "Packet":
         raw = raw.strip()
-        if len(raw) < 12:
+        if len(raw) < 14:
             raise ProtocolError(f"слишком короткий пакет: {raw!r}")
         if not raw.endswith(ETX):
             raise ProtocolError(f"нет завершителя 7d: {raw!r}")
@@ -48,7 +48,14 @@ class Packet:
             length = int(raw[8:10], 16)
         except ValueError as err:
             raise ProtocolError(f"нечитаемый заголовок: {raw!r}") from err
+        # Local 2.2.1: строгое обрамление, hex и полный байт данных.
+        if length % 2 or len(raw) != 10 + length + 4:
+            raise ProtocolError("длина пакета не совпадает с заголовком")
         data = raw[10 : 10 + length]
+        try:
+            bytes.fromhex(data)
+        except ValueError as err:
+            raise ProtocolError("данные не являются hex") from err
         if len(data) != length:
             raise ProtocolError(
                 f"объявлено {length} симв. данных, получено {len(data)}: {raw!r}"

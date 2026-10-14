@@ -3,10 +3,12 @@
     "step": {
       "user": {
         "title": "Rinnai Boiler",
-        "description": "Enter the RoomControlId of your Rinnai remote (its Wi-Fi MAC, 12 hex characters) and the DeviceId of a phone already registered in the Rinnai app. The cloud only accepts a DeviceId it already knows.",
+        "description": "For local control, enable Local only and enter the controller MAC and port 9105. Leave DeviceId empty. Redirect the controller to this server on your router.",
         "data": {
           "room_control_id": "RoomControlId (remote MAC)",
-          "device_id": "DeviceId (registered phone)"
+          "device_id": "DeviceId (registered phone)",
+          "local_only": "Local only (no cloud)",
+          "local_port": "Local server port"
         }
       }
     },
@@ -14,7 +16,7 @@
       "invalid_id": "The identifier must be 12 hexadecimal characters.",
       "invalid_room_control_id": "The Rinnai cloud does not recognise this remote.",
       "cannot_connect": "Cannot reach the Rinnai cloud.",
-      "invalid_device_id": "DeviceId must be a UUID, for example A1B2C3D4-1234-5678-9ABC-DEF012345678."
+      "invalid_device_id": "Cloud mode requires a registered UUID or a 16-character Android ID."
     },
     "abort": {
       "already_configured": "This boiler is already configured."

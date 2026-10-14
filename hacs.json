@@ -1,5 +1,5 @@
 {
-  "name": "Rinnai Boiler (local + cloud)",
+  "name": "Rinnai Boiler (local-first fork)",
   "render_readme": true,
   "homeassistant": "2024.6.0"
 }
