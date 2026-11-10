@@ -104,9 +104,8 @@ class RinnaiClimate(RinnaiEntity, ClimateEntity):
         data = self._data
         if not data.get("power") or not data.get("heating"):
             return HVACAction.OFF
-        # Горит ли горелка на отопление: по состоянию горелки, а не по
-        # сравнению температур — в режиме по теплоносителю сравнивать не с чем.
-        if data.get("combustion_state") and not data.get("hot_water_using"):
+        # Коды пульта: 1 — ожидание, 2 — горение на отопление, 4 — ГВС.
+        if data.get("combustion_state") == 2 and not data.get("hot_water_using"):
             return HVACAction.HEATING
         return HVACAction.IDLE
 

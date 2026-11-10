@@ -45,6 +45,12 @@ HA reports the next measured state packet, rather than assuming a command worked
 **Пока пульт направлен на HA, штатное приложение Rinnai не видит котёл.**
 Для возврата облака выключите перенаправление и переподключите пульт к Wi-Fi.
 
+## Changes in 2.2.2
+
+- Home Assistant reports active space heating only for burner code `2` and no
+  hot-water draw. Code `1` indicates standby, and code `4` indicates DHW firing.
+- The diagnostic burner sensor still exposes the raw code with the same entity ID.
+
 ## Changes in 2.2.1
 
 - Local configuration needs only the controller MAC and listener port.
