@@ -32,6 +32,22 @@ def _mode(data: dict) -> str:
     return "Ожидание"
 
 
+def _burner_activity(data: dict) -> str | None:
+    """Показывать фактическую работу, а не разрешённый режим котла."""
+    code = data.get("combustion_state")
+    if data.get("power") is False:
+        return "Выключена"
+    if code == 4:
+        return "Греет ГВС"
+    if data.get("hot_water_using"):
+        return "Водоразбор"
+    if code == 2:
+        return "Греет отопление"
+    if code == 1:
+        return "Ожидание"
+    return "Неизвестно" if code is not None else None
+
+
 def _schedule(data: dict) -> str:
     value = data.get("schedule")
     if value is None:
@@ -69,7 +85,7 @@ SENSORS: tuple[RinnaiSensorDescription, ...] = (
         key="combustion_state",
         name="Горелка",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda d: d.get("combustion_state"),
+        value_fn=_burner_activity,
     ),
     RinnaiSensorDescription(
         key="error_code",
@@ -115,3 +131,9 @@ class RinnaiSensor(RinnaiEntity, SensorEntity):
     @property
     def native_value(self):
         return self.entity_description.value_fn(self._data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, int | None] | None:
+        if self.entity_description.key == "combustion_state":
+            return {"burner_code": self._data.get("combustion_state")}
+        return None

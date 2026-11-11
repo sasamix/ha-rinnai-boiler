@@ -87,7 +87,7 @@ class RinnaiLocalServer:
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Local 2.2.1: проверка сервера до изменения маршрута пульта."""
-        return web.json_response({"service": "rinnai", "version": "2.2.2",
+        return web.json_response({"service": "rinnai", "version": "2.2.3",
                                   "room_control_id": self.room_control_id,
                                   "online": self.online})
 

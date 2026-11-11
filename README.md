@@ -45,6 +45,13 @@ HA reports the next measured state packet, rather than assuming a command worked
 **Пока пульт направлен на HA, штатное приложение Rinnai не видит котёл.**
 Для возврата облака выключите перенаправление и переподключите пульт к Wi-Fi.
 
+## Changes in 2.2.3
+
+- The existing burner sensor shows actual activity as text: space heating,
+  DHW firing, water draw without confirmed firing, standby, or off.
+- The entity ID is unchanged. Numeric automations must read the `burner_code`
+  attribute instead of the state. The boiler mode sensor still shows enabled functions.
+
 ## Changes in 2.2.2
 
 - Home Assistant reports active space heating only for burner code `2` and no
