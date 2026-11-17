@@ -24,7 +24,6 @@ async def async_setup_entry(
 class RinnaiWaterHeater(RinnaiEntity, WaterHeaterEntity):
     """Контур ГВС."""
 
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_supported_features = (
         WaterHeaterEntityFeature.TARGET_TEMPERATURE
         | WaterHeaterEntityFeature.OPERATION_MODE
@@ -36,13 +35,21 @@ class RinnaiWaterHeater(RinnaiEntity, WaterHeaterEntity):
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "water_heater", "ГВС")
 
-    @property
-    def current_temperature(self) -> float | None:
+    def _current(self) -> float | None:
         return self._data.get("hw_cur")
 
-    @property
-    def target_temperature(self) -> float | None:
+    def _target(self) -> float | None:
         return self._data.get("hw_set")
+
+    # HA 2026.11 переименовал свойства температуры в native_* (старые перестанут работать в 2027.11).
+    if hasattr(WaterHeaterEntity, "native_current_temperature"):
+        _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
+        native_current_temperature = property(_current)
+        native_target_temperature = property(_target)
+    else:
+        _attr_temperature_unit = UnitOfTemperature.CELSIUS
+        current_temperature = property(_current)
+        target_temperature = property(_target)
 
     @property
     def current_operation(self) -> str:

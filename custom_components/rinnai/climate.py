@@ -35,7 +35,6 @@ class RinnaiClimate(RinnaiEntity, ClimateEntity):
     """Отопление: по воздуху в доме или по теплоносителю."""
 
     _attr_translation_key = "heating"
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
     _attr_preset_modes = [PRESET_ROOM, PRESET_CIRCUIT]
     _attr_supported_features = (
@@ -69,14 +68,12 @@ class RinnaiClimate(RinnaiEntity, ClimateEntity):
 
     # ---------- температуры ----------
 
-    @property
-    def current_temperature(self) -> float | None:
+    def _current(self) -> float | None:
         # Температуру теплоносителя котёл не сообщает, так что в обоих
         # режимах показываем воздух в доме — единственный живой датчик.
         return self._data.get("room_cur")
 
-    @property
-    def target_temperature(self) -> float | None:
+    def _target(self) -> float | None:
         key = "circuit_set" if self._circuit_mode else "room_set"
         value = self._data.get(key)
         if value is None:
@@ -86,6 +83,17 @@ class RinnaiClimate(RinnaiEntity, ClimateEntity):
         # число вне диапазона термостата. Отдаём значение в границах сущности,
         # иначе Home Assistant и HomeKit получают состояние вне своих пределов.
         return min(max(float(value), self.min_temp), self.max_temp)
+
+    # HA 2026.11 переименовал свойства температуры в native_* (старые перестанут работать в 2027.11);
+    # на более старых HA новых имён нет — выбираем по наличию.
+    if hasattr(ClimateEntity, "native_current_temperature"):
+        _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
+        native_current_temperature = property(_current)
+        native_target_temperature = property(_target)
+    else:
+        _attr_temperature_unit = UnitOfTemperature.CELSIUS
+        current_temperature = property(_current)
+        target_temperature = property(_target)
 
     @property
     def extra_state_attributes(self) -> dict:

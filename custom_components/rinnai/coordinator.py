@@ -1,9 +1,10 @@
 """Состояние котла: локальный сервер, если пульт подключился, иначе облако."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 import time
+from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -38,10 +39,10 @@ class RinnaiCoordinator(DataUpdateCoordinator[dict]):
         self.local_only = entry.data.get(CONF_LOCAL_ONLY, False)
         self.api = None if self.local_only else RinnaiApi(self.room_control_id, entry.data[CONF_DEVICE_ID])
         port = entry.options.get(CONF_LOCAL_PORT, DEFAULT_LOCAL_PORT)
-        self.server = RinnaiLocalServer(port, self._on_local_state, self.room_control_id)
+        self.server = RinnaiLocalServer(port, self._on_local_state, self.room_control_id, clock=self._local_now)
         self._local_state: dict | None = None
         self._cloud_extras: dict = {}
-        self._started = time.time()
+        self._started = time.monotonic()
 
     # ---------- источник данных ----------
 
@@ -88,7 +89,7 @@ class RinnaiCoordinator(DataUpdateCoordinator[dict]):
             # ему льготное окно и отдаём последнее известное состояние, а не
             # роняем интеграцию в ERROR. Молчит дольше окна — это уже потеря связи.
             last_contact = max(self._started, self.server.last_seen or 0)
-            if time.time() - last_contact < LOCAL_GRACE_SECONDS:
+            if time.monotonic() - last_contact < LOCAL_GRACE_SECONDS:
                 _LOGGER.debug("Ждём пульт на локальном сервере: %s", err)
                 # Пока состояния нет вовсе (первый опрос) — сущности остаются
                 # недоступными, а не показывают «выключено» с пустыми данными.
@@ -174,6 +175,18 @@ class RinnaiCoordinator(DataUpdateCoordinator[dict]):
             self._patch_local(protocol.IDX_AWAY, 0x80 if enable else 0x00)
             return
         await self._send_cloud(self.api.set_away, enable)
+
+    def _local_now(self) -> datetime:
+        """Местное время HA — пульт ждёт его в каждом ответе (байты 49–55, как у облака)."""
+        tz = getattr(getattr(self.hass, "config", None), "time_zone", None) or "UTC"
+        return datetime.now(ZoneInfo(tz))
+
+    async def async_set_smart_mode(self, value: int) -> None:
+        """Режим Smart control (байт 10) — только локально.
+
+        Байт пишется целиком: в записи обмена встречались только 00/03/04/80, других битов в нём не видели.
+        """
+        self._patch_local(protocol.IDX_SMART, value)
 
     async def async_set_economy(self, enable: bool) -> None:
         if self.local_only:

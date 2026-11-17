@@ -101,6 +101,7 @@ async def verify(path):
     entry = types.SimpleNamespace(data={'room_control_id': 'aabbccddeeff', 'local_only': True}, options={})
     coord = coord_mod.RinnaiCoordinator(hass, entry)
     assert coord.api is None
+    coord.server._clock = None  # эхо-проверка ниже — без подстановки часов; часы проверяет tests/verify_fork.py
     try:
         await coord._async_update_data()
         assert False, 'No-state update must fail'
@@ -124,7 +125,7 @@ async def verify(path):
     try:
         response = await client.get('/health')
         health = await response.json()
-        assert health['room_control_id'] == headers['Referer'] and not health['online']
+        assert health['room_control_id'] == '*' * 8 + headers['Referer'][-4:] and not health['online']
         # Every captured request is accepted and echoed byte for byte when idle.
         for request, raw in frames:
             if request:
@@ -133,6 +134,21 @@ async def verify(path):
                 assert int(response.headers['Content-Length']) == len(raw)
         await asyncio.sleep(0)
         assert coord.local_active and coord.data['source'] == 'Локально'
+        # Clock in the reply (like the cloud): implausible time or a failing clock leaves the packet as is.
+        import datetime as _dt
+        def broken():
+            raise RuntimeError('clock')
+        for clock in (lambda: _dt.datetime(2000, 1, 1), broken):
+            coord.server._clock = clock
+            _, body = await post(initial)
+            assert body == initial
+        coord.server._clock = lambda: _dt.datetime(2026, 11, 15, 7, 5, 9)  # воскресенье
+        _, body = await post(initial)
+        reply = protocol.Packet.parse(body)
+        if len(reply.data) >= 112:
+            assert reply.prefix == 're0101' and reply.data[98:112] == '05070015112609'
+            assert reply.data[:98] == protocol.Packet.parse(initial).data[:98]
+        coord.server._clock = None
         # Return to the captured initial state before producing commands.
         await post(initial)
         await asyncio.sleep(0)
@@ -150,6 +166,16 @@ async def verify(path):
         await post(confirmation)
         await asyncio.sleep(0)
         assert coord.data['room_set'] == 25
+        # A lost reply: the pult repeats its old state, so the command is sent again; once confirmed, it is dropped.
+        assert coord.server.pending_commands == 0
+        await coord.async_set_hot_water_temp(46)
+        _, first = await post(initial)
+        _, again = await post(initial)
+        resent = protocol.set_byte(source.data, 3, 46)
+        assert protocol.Packet.parse(first).data == protocol.Packet.parse(again).data == resent
+        confirmed = protocol.Packet('re0101', 1, resent).build()
+        _, body = await post(confirmed)
+        assert body == confirmed and coord.server.pending_commands == 0
 
         await coord.async_set_hot_water_temp(47)
         _, body = await post(initial)
@@ -175,7 +201,7 @@ async def verify(path):
         with patch.object(server_mod.time, 'monotonic', return_value=future):
             _, body = await post(initial)
             assert body == initial
-        coord.server.last_seen = time.time() - 31
+        coord.server.last_seen = time.monotonic() - 31
         try:
             await coord.async_set_room_temp(25)
             assert False, 'Offline write must fail'
@@ -196,7 +222,7 @@ async def verify(path):
                 protocol.Packet.parse(raw)
                 assert False, 'Malformed frame must fail'
             except protocol.ProtocolError: pass
-        print(f'PASS: {len(frames)} captured frames; real HTTP replay; room/DHW commands; confirmation; identity; checksum; expiry; offline; registration.')
+        print(f'PASS: {len(frames)} captured frames; real HTTP replay; room/DHW commands; confirmation; resend after a lost reply; identity; checksum; expiry; offline; registration.')
     finally:
         await client.close()
 

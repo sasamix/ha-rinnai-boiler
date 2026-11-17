@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 ETX = "7d"
 
@@ -100,6 +101,13 @@ IDX_AWAY = 9
 # Байты 7-8 в пакете пульта совпадают с облачным запросом кода ошибки
 # (ffff = ошибок нет) — проверено побайтовым сопоставлением.
 IDX_ERROR = 7
+# По записи обмена приложение → облако → WF-100W-RU (2026-11-17):
+# байт 10 — режим «Smart control»: 00 обычный, 03 «Save» (эконом), 04 «Sleep» (ночной), 80 «Auto»
+IDX_SMART = 10
+SMART_MODES = {0x00: "normal", 0x03: "economy", 0x04: "sleep", 0x80: "auto"}
+# байты 49–55 — часы в BCD: минуты, часы, день недели (0 = вс), число, месяц, год (две цифры), секунды.
+# Пульт шлёт 54–55 нулями, облако в КАЖДОМ ответе (и re0101, и sm0101) подставляет текущее время.
+IDX_CLOCK = 49
 
 
 def half_degree(value: int) -> float:
@@ -134,5 +142,16 @@ def decode_state(data: str) -> dict:
             if data[IDX_ERROR * 2 : IDX_ERROR * 2 + 4].lower() == "ffff"
             else data[IDX_ERROR * 2 : IDX_ERROR * 2 + 4]
         ),
+        "smart_mode": byte(data, IDX_SMART) if len(data) >= (IDX_SMART + 1) * 2 else None,
         "raw_state": data,
     }
+
+
+def set_clock(data: str, now: datetime) -> str:
+    """Подставить время как облако (байты 49–55, BCD). Короткий пакет — без изменений."""
+    if len(data) < (IDX_CLOCK + 7) * 2:
+        return data
+    vals = [now.minute, now.hour, (now.weekday() + 1) % 7, now.day, now.month, now.year % 100, now.second]
+    clock = "".join(f"{v:02d}" for v in vals)
+    pos = IDX_CLOCK * 2
+    return data[:pos] + clock + data[pos + len(clock):]

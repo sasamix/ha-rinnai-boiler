@@ -12,12 +12,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 import logging
 import time
 
 from aiohttp import web
 
-from .protocol import Packet, ProtocolError, decode_state, checksum
+from .protocol import Packet, ProtocolError, decode_state, checksum, set_clock
 from .const import LOCAL_TIMEOUT_SECONDS, COMMAND_TTL_SECONDS
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,8 +33,12 @@ TOKEN_LENGTH = 32
 class RinnaiLocalServer:
     """HTTP-сервер, к которому подключается пульт вместо облака."""
 
-    def __init__(self, port: int, on_state: Callable[[dict, str], None], room_control_id: str) -> None:
+    def __init__(self, port: int, on_state: Callable[[dict, str], None], room_control_id: str,
+                 clock: Callable[[], datetime] | None = None) -> None:
         self._port = port
+        # Часы для ответа пульту (как у облака): функция, возвращающая местное время; None — не подставлять.
+        self._clock = clock
+        self._clock_warned = False
         self.room_control_id = room_control_id.lower()
         self._on_state = on_state
         self._runner: web.AppRunner | None = None
@@ -77,7 +82,7 @@ class RinnaiLocalServer:
 
     @property
     def online(self) -> bool:
-        return self.last_seen is not None and (time.time() - self.last_seen) < LOCAL_TIMEOUT_SECONDS
+        return self.last_seen is not None and (time.monotonic() - self.last_seen) < LOCAL_TIMEOUT_SECONDS
 
     @property
     def pending_commands(self) -> int:
@@ -87,8 +92,9 @@ class RinnaiLocalServer:
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Local 2.2.1: проверка сервера до изменения маршрута пульта."""
+        # MAC пульта — единственная проверка в /state (Referer), поэтому целиком его не показываем.
         return web.json_response({"service": "rinnai", "version": "2.2.3",
-                                  "room_control_id": self.room_control_id,
+                                  "room_control_id": "*" * 8 + self.room_control_id[-4:],
                                   "online": self.online})
 
     async def _handle_register(self, request: web.Request) -> web.Response:
@@ -98,7 +104,7 @@ class RinnaiLocalServer:
         try:
             packet = Packet.parse(body)
         except ProtocolError as err:
-            _LOGGER.warning("нераспознанный /register (%s): %s", err, body)
+            _LOGGER.warning("нераспознанный /register (%s): %.200s", err, body)
             return web.Response(text="", content_type="text/plain")
 
         if (packet.prefix != REGISTER_PREFIX
@@ -126,7 +132,7 @@ class RinnaiLocalServer:
         try:
             packet = Packet.parse(body)
         except ProtocolError as err:
-            _LOGGER.warning("нераспознанный /state (%s): %s", err, body)
+            _LOGGER.warning("нераспознанный /state (%s): %.200s", err, body)
             return web.Response(text="", content_type="text/plain")
 
         if (packet.prefix != STATE_PREFIX or packet.command != 1
@@ -139,27 +145,49 @@ class RinnaiLocalServer:
             _LOGGER.warning("Не удалось разобрать состояние: %s", err)
             return web.Response(status=400, text="Invalid state data")
         else:
-            self.last_seen = time.time()
+            self.last_seen = time.monotonic()  # монотонное: скачок системных часов не путает «на связи»
             self.last_raw = body
             self._on_state(state, packet.data)
 
         data = packet.data
         prefix = packet.prefix
         if self._pending:
-            pending, self._pending = self._pending, []
+            # Команда держится в очереди, пока пакет пульта её не подтвердит (правка больше ничего
+            # не меняет) или не истечёт срок: ответ мог не дойти (обрыв связи, перезапуск HA), а все
+            # правки можно безопасно применить повторно (установка/сброс битов, фиксированные значения).
+            pending, keep = self._pending, []
             for deadline, patch in pending:
                 if time.monotonic() > deadline:
                     _LOGGER.warning("Просроченная команда пульту отброшена")
                     continue
                 try:
-                    data = patch(data)
+                    patched = patch(data)
                 except ProtocolError as err:
                     _LOGGER.error("команда пропущена, правка невозможна: %s", err)
+                    continue
+                if patched != data:
+                    data = patched
+                    keep.append((deadline, patch))
+            self._pending = keep
             if data != packet.data:
                 # Пульт применяет изменения только у пакета с этим префиксом.
                 prefix = COMMAND_REPLY_PREFIX
                 _LOGGER.info("Команда отправлена пульту: %s -> %s", packet.data, data)
 
+        # Время в каждом ответе, как у облака (префикс не меняет). Неправдоподобное время
+        # (часы хоста ещё не синхронизированы) или ошибка часов — байты 49–55 не трогаем.
+        if self._clock is not None:
+            try:
+                now = self._clock()
+                if now.year >= 2025:
+                    data = set_clock(data, now)
+                elif not self._clock_warned:
+                    self._clock_warned = True
+                    _LOGGER.warning("Часы HA показывают %s — время пульту не отправляем", now)
+            except Exception:  # noqa: BLE001 — ответ пульту важнее часов
+                if not self._clock_warned:
+                    self._clock_warned = True
+                    _LOGGER.exception("Не удалось получить время для пульта")
         reply = Packet(prefix=prefix, command=packet.command, data=data)
         return self._reply(reply)
 

@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import RinnaiConfigEntry
-from .const import FLAG_CIRCUIT_MODE, FLAG_HEATING, FLAG_HOT_WATER, FLAG_POWER
+from .const import FLAG_CIRCUIT_MODE, FLAG_HEATING, FLAG_HOT_WATER, FLAG_POWER, FLAG_PRE_HEAT
 from .entity import RinnaiEntity
 
 FLAG_SWITCHES = (
@@ -15,6 +15,8 @@ FLAG_SWITCHES = (
     ("hot_water", "ГВС вкл", FLAG_HOT_WATER, None),
     ("heating", "Отопление вкл", FLAG_HEATING, None),
     ("circuit_mode", "По теплоносителю", FLAG_CIRCUIT_MODE, EntityCategory.CONFIG),
+    # «Hot water preheating» в приложении = бит 0x10 байта 0 (проверено записью обмена)
+    ("pre_heat", "Подогрев ГВС", FLAG_PRE_HEAT, None),
 )
 
 

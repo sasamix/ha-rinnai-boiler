@@ -45,6 +45,23 @@ HA reports the next measured state packet, rather than assuming a command worked
 **Пока пульт направлен на HA, штатное приложение Rinnai не видит котёл.**
 Для возврата облака выключите перенаправление и переподключите пульт к Wi-Fi.
 
+## Smart control, hot water preheat and controller clock (local mode)
+
+Found by recording the official app → cloud → WF-100W-RU exchange and confirmed on a real boiler:
+
+- **Smart control mode** — `select` «Режим Smart»: normal / eco (Save) / sleep / auto, byte 10 of the status packet
+  (`00` / `03` / `04` / `80`). In auto the controller changes the setpoints itself (on the test boiler: circuit 60 °C, DHW 40 °C).
+- **Hot water preheat** — `switch` «Подогрев ГВС», bit `0x10` of byte 0 (the controller switches it off by itself after 30 min).
+- **Controller clock** — like the cloud, every reply carries the local time in bytes 49–55 (BCD: minute, hour,
+  weekday with 0 = Sunday, day, month, year, second). It is skipped if Home Assistant's clock looks wrong.
+- **Commands survive a lost reply** — a queued change is re-sent until a status packet confirms it (still expires after 30 s).
+- `/health` no longer shows the full controller MAC (it is the only identity check of `/state`).
+
+Status bytes seen in the capture: 9 — away (`0x80`), 10 — Smart control, 13 — controller schedule
+(`0x80` on, `0x81` 24 h, `0x83` 24 h + weekly), 26–32 — weekly schedule (not decoded), 49–55 — clock.
+Wake-up, Outing setting and Returning home setting do not change the controller's packet — the cloud runs them.
+
+
 ## Changes in 2.2.3
 
 - The existing burner sensor shows actual activity as text: space heating,
